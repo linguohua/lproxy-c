@@ -75,7 +75,8 @@ func (r *Request) onServerFinished(lastSeqNo uint32) {
 	if r.expectedSeq < lastSeqNo {
 		// we has more data to recv
 		r.pendingHalfClosed = true
-		log.Println("req onServerFinished pending, last:", lastSeqNo)
+		log.Printf("req %d:%d onServerFinished pending, last:%d",
+			r.idx, r.tag, lastSeqNo)
 	} else {
 		if r.conn != nil {
 			r.conn.CloseWrite()
@@ -88,7 +89,8 @@ func (r *Request) onServerClosed(lastSeqNo uint32) bool {
 	if r.expectedSeq < lastSeqNo {
 		// we has more data to recv
 		r.pendingClosed = true
-		log.Println("req onServerClosed pending, last:", lastSeqNo)
+		log.Printf("req %d:%d onServerClosed pending, last:%ds",
+			r.idx, r.tag, lastSeqNo)
 		return false
 	}
 
@@ -104,14 +106,16 @@ func (r *Request) onClientData(seq uint32, data []byte) {
 		r.doSend()
 
 		if r.pendingHalfClosed {
-			log.Printf("has pendingHalfClosed, expected:%d, last:%d", r.expectedSeq, r.lastSeqNo)
+			log.Printf("req %d:%d has pendingHalfClosed, expected:%d, last:%d",
+				r.idx, r.tag, r.expectedSeq, r.lastSeqNo)
 			if r.expectedSeq >= r.lastSeqNo && r.conn != nil {
 				r.conn.CloseWrite()
 			}
 		}
 
 		if r.pendingClosed {
-			log.Printf("has pendingClosed, expected:%d, last:%d", r.expectedSeq, r.lastSeqNo)
+			log.Printf("req %d:%d has pendingClosed, expected:%d, last:%d",
+				r.idx, r.tag, r.expectedSeq, r.lastSeqNo)
 			if r.expectedSeq >= r.lastSeqNo && r.tunnel != nil {
 				r.tunnel.freeRequest(r.idx, r.tag)
 			}
@@ -123,7 +127,8 @@ func (r *Request) proxy() {
 	// log.Println("proxy ...")
 	c := r.conn
 	if c == nil {
-		log.Println("proxy failed, conn is nil")
+		log.Printf("request %d:%d failed, conn is nil",
+			r.idx, r.tag)
 		return
 	}
 
@@ -132,7 +137,8 @@ func (r *Request) proxy() {
 	r.tunnel.sendRequestCreate(r)
 
 	if !r.isUsed {
-		log.Println("proxy failed, req is not used")
+		log.Printf("request %d:%d failed, req is not used",
+			r.idx, r.tag)
 		return
 	}
 
@@ -142,22 +148,24 @@ func (r *Request) proxy() {
 
 		if !r.isUsed {
 			// request is free!
-			log.Println("proxy read, request is free, discard data:", n)
+			log.Printf("request %d:%d read, request is free, discard data:%d",
+				r.idx, r.tag, n)
 			break
 		}
 
 		t := r.tunnel
 		if t == nil {
-			log.Println("proxy read, no tunnel valid, discard data:", n)
+			log.Printf("request %d:%d read read, no tunnel valid, discard data:%d",
+				r.idx, r.tag, n)
 			break
 		}
 
 		if err != nil {
 			if err == io.EOF {
-				log.Println("proxy read, client half close")
+				log.Printf("request %d:%d read, client half close", r.idx, r.tag)
 				t.onRequestHalfClosed(r)
 			} else {
-				log.Println("proxy read failed:", err)
+				log.Printf("request %d:%d  read failed:%v", r.idx, r.tag, err)
 				t.onRequestTerminate(r)
 			}
 
@@ -165,7 +173,7 @@ func (r *Request) proxy() {
 		}
 
 		if n == 0 {
-			log.Println("proxy read, server half close")
+			log.Printf("request %d:%d read, server half close", r.idx, r.tag)
 			t.onRequestHalfClosed(r)
 			break
 		}
@@ -220,15 +228,18 @@ func (r *Request) doSend() {
 		if header.seqNo == r.expectedSeq {
 			header = r.queue.pop()
 			err := r.sendto(header.data)
-			if err != nil {
-				log.Println("request sendto failed:", err)
-
-				break
-			}
-
 			// move to next seq
 			r.expectedSeq++
 			r.sendQuotaTick++
+
+			if err != nil {
+				log.Printf("request %d:%d sendto failed. force close:%v",
+					r.idx, r.tag, err)
+
+				// force free
+				r.tunnel.onRequestTerminate(r)
+				break
+			}
 
 			if r.sendQuotaTick == defaultQuotaReport {
 				r.sendQuotaTick = 0
