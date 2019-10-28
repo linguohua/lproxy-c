@@ -122,7 +122,7 @@ func (t *Tunnel) onPong(msg []byte) {
 
 func (t *Tunnel) onClose() {
 	for _, r := range t.reqMap {
-		t.handleRequestClosed(r.idx, r.tag)
+		t.freeRequest(r.idx, r.tag)
 	}
 
 	t.reqMap = make(map[uint16]*Request)
@@ -149,9 +149,9 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 	case cMDReqData:
 		t.handleRequestData(idx, tag, message[5:])
 	case cMDReqServerFinished:
-		t.handleRequestFinished(idx, tag)
+		t.handleServerFinished(idx, tag, message[5:])
 	case cMDReqServerClosed:
-		t.handleRequestClosed(idx, tag)
+		t.handleServerClosed(idx, tag, message[5:])
 	default:
 		log.Printf("onTunnelMessage, unsupport tunnel cmd:%d", cmd)
 	}
@@ -170,20 +170,34 @@ func (t *Tunnel) handleRequestData(idx uint16, tag uint16, message []byte) {
 	req.onClientData(seqno, message[4:])
 }
 
-func (t *Tunnel) handleRequestFinished(idx uint16, tag uint16) {
+func (t *Tunnel) handleServerFinished(idx uint16, tag uint16, message []byte) {
 	req, err := t.owner.reqq.get(idx, tag)
 	if err != nil {
 		//log.Println("handleRequestData, get req failed:", err)
 		return
 	}
 
-	req.onClientFinished()
+	lastSeqNo := binary.LittleEndian.Uint32(message)
+	req.onServerFinished(lastSeqNo)
 }
 
-func (t *Tunnel) handleRequestClosed(idx uint16, tag uint16) {
+func (t *Tunnel) handleServerClosed(idx uint16, tag uint16, message []byte) {
+	req, err := t.owner.reqq.get(idx, tag)
+	if err != nil {
+		//log.Println("handleRequestData, get req failed:", err)
+		return
+	}
+
+	lastSeqNo := binary.LittleEndian.Uint32(message)
+	if req.onServerClosed(lastSeqNo) {
+		t.freeRequest(req.idx, req.tag)
+	}
+}
+
+func (t *Tunnel) freeRequest(idx uint16, tag uint16) {
 	err := t.owner.reqq.free(idx, tag)
 	if err != nil {
-		//log.Println("handleRequestClosed, get req failed:", err)
+		//log.Println("freeRequest, get req failed:", err)
 		return
 	}
 }
@@ -197,7 +211,7 @@ func (t *Tunnel) onRequestTerminate(req *Request) {
 
 	t.write(buf)
 
-	t.handleRequestClosed(req.idx, req.tag)
+	t.freeRequest(req.idx, req.tag)
 }
 
 func (t *Tunnel) onRequestHalfClosed(req *Request) {

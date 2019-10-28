@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"lproxyc/socks5"
-	"net"
 )
 
 // Reqq request queue
@@ -85,13 +84,7 @@ func (q *Reqq) alloc(sreq *socks5.SocksRequest, t *Tunnel) (*Request, error) {
 		return nil, fmt.Errorf("slots idx point to in-used req")
 	}
 
-	req.tag++
-	req.isUsed = true
-	req.sreq = sreq
-	req.conn = sreq.Conn.(*net.TCPConn)
-
-	req.tunnel = t
-	req.expectedSeq = 0
+	req.use(sreq, t)
 
 	return req, nil
 }
@@ -110,11 +103,8 @@ func (q *Reqq) free(idx uint16, tag uint16) error {
 		return fmt.Errorf("free, req %d:%d is in not match tag %d", idx, tag, req.tag)
 	}
 
-	req.tag++
-	req.isUsed = false
 	q.push(idx)
-
-	req.dofree()
+	req.unuse()
 
 	log.Printf("reqq free req %d:%d", idx, tag)
 

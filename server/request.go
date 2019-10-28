@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	"lproxyc/socks5"
 	"net"
 	"sync"
@@ -26,8 +27,11 @@ type Request struct {
 	inSending bool
 	conn      *net.TCPConn
 
-	expectedSeq   uint32
-	sendQuotaTick int
+	expectedSeq       uint32
+	sendQuotaTick     int
+	lastSeqNo         uint32
+	pendingClosed     bool
+	pendingHalfClosed bool
 
 	queue *RPacketQueue
 }
@@ -39,20 +43,56 @@ func newRequest(o *Account, idx uint16) *Request {
 	return r
 }
 
-func (r *Request) dofree() {
+func (r *Request) use(sreq *socks5.SocksRequest, t *Tunnel) {
+	r.pendingClosed = false
+	r.pendingHalfClosed = false
+	r.lastSeqNo = 0
+
+	r.sreq = sreq
+	r.conn = sreq.Conn.(*net.TCPConn)
+
+	r.tunnel = t
+	r.expectedSeq = 0
+
+	r.tag++
+	r.isUsed = true
+}
+
+func (r *Request) unuse() {
+	r.tunnel = nil
+	r.sreq = nil
+	r.tag++
+	r.isUsed = false
+
 	if r.conn != nil {
 		r.conn.Close()
 		r.conn = nil
 	}
-
-	r.tunnel = nil
-	r.sreq = nil
 }
 
-func (r *Request) onClientFinished() {
-	if r.conn != nil {
-		r.conn.CloseWrite()
+func (r *Request) onServerFinished(lastSeqNo uint32) {
+	r.lastSeqNo = lastSeqNo
+	if r.expectedSeq < lastSeqNo {
+		// we has more data to recv
+		r.pendingHalfClosed = true
+		log.Println("req onServerFinished pending, last:", lastSeqNo)
+	} else {
+		if r.conn != nil {
+			r.conn.CloseWrite()
+		}
 	}
+}
+
+func (r *Request) onServerClosed(lastSeqNo uint32) bool {
+	r.lastSeqNo = lastSeqNo
+	if r.expectedSeq < lastSeqNo {
+		// we has more data to recv
+		r.pendingClosed = true
+		log.Println("req onServerClosed pending, last:", lastSeqNo)
+		return false
+	}
+
+	return true
 }
 
 func (r *Request) onClientData(seq uint32, data []byte) {
@@ -62,6 +102,20 @@ func (r *Request) onClientData(seq uint32, data []byte) {
 
 		// loop heap
 		r.doSend()
+
+		if r.pendingHalfClosed {
+			log.Printf("has pendingHalfClosed, expected:%d, last:%d", r.expectedSeq, r.lastSeqNo)
+			if r.expectedSeq >= r.lastSeqNo && r.conn != nil {
+				r.conn.CloseWrite()
+			}
+		}
+
+		if r.pendingClosed {
+			log.Printf("has pendingClosed, expected:%d, last:%d", r.expectedSeq, r.lastSeqNo)
+			if r.expectedSeq >= r.lastSeqNo && r.tunnel != nil {
+				r.tunnel.freeRequest(r.idx, r.tag)
+			}
+		}
 	}
 }
 
@@ -99,8 +153,14 @@ func (r *Request) proxy() {
 		}
 
 		if err != nil {
-			log.Println("proxy read failed:", err)
-			t.onRequestTerminate(r)
+			if err == io.EOF {
+				log.Println("proxy read, client half close")
+				t.onRequestHalfClosed(r)
+			} else {
+				log.Println("proxy read failed:", err)
+				t.onRequestTerminate(r)
+			}
+
 			break
 		}
 
