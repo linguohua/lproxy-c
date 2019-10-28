@@ -89,7 +89,7 @@ func (r *Request) onServerClosed(lastSeqNo uint32) bool {
 	if r.expectedSeq < lastSeqNo {
 		// we has more data to recv
 		r.pendingClosed = true
-		log.Printf("req %d:%d onServerClosed pending, last:%ds",
+		log.Printf("req %d:%d onServerClosed pending, last:%d",
 			r.idx, r.tag, lastSeqNo)
 		return false
 	}
@@ -237,7 +237,10 @@ func (r *Request) doSend() {
 					r.idx, r.tag, err)
 
 				// force free
-				r.tunnel.onRequestTerminate(r)
+				if r.tunnel != nil {
+					r.tunnel.onRequestTerminate(r)
+				}
+
 				break
 			}
 
