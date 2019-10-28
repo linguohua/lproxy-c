@@ -18,6 +18,7 @@ const (
 	cMDReqClientFinished = 4
 	cMDReqServerFinished = 5
 	cMDReqServerClosed   = 6
+	cMDReqClientQuota    = 7
 )
 
 // Tunnel tunnel
@@ -205,6 +206,16 @@ func (t *Tunnel) onRequestHalfClosed(req *Request) {
 	buf[0] = cMDReqClientFinished
 	binary.LittleEndian.PutUint16(buf[1:], req.idx)
 	binary.LittleEndian.PutUint16(buf[3:], req.tag)
+
+	t.write(buf)
+}
+
+func (t *Tunnel) onQuotaReport(req *Request, quota uint16) {
+	buf := make([]byte, 5+2)
+	buf[0] = cMDReqClientQuota
+	binary.LittleEndian.PutUint16(buf[1:], req.idx)
+	binary.LittleEndian.PutUint16(buf[3:], req.tag)
+	binary.LittleEndian.PutUint16(buf[5:], quota)
 
 	t.write(buf)
 }

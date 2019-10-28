@@ -9,6 +9,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	defaultQuotaReport = 20
+)
+
 // Request request
 type Request struct {
 	isUsed bool
@@ -22,7 +26,8 @@ type Request struct {
 	inSending bool
 	conn      *net.TCPConn
 
-	expectedSeq uint32
+	expectedSeq   uint32
+	sendQuotaTick int
 
 	queue *RPacketQueue
 }
@@ -116,6 +121,9 @@ func writeAll(buf []byte, nc net.Conn) error {
 		nc.SetWriteDeadline(time.Now().Add(time.Second))
 		n, err := nc.Write(buf[wrote:])
 		if err != nil {
+			// discard connection
+			nc.Close()
+
 			return err
 		}
 
@@ -154,12 +162,18 @@ func (r *Request) doSend() {
 			err := r.sendto(header.data)
 			if err != nil {
 				log.Println("request sendto failed:", err)
+
 				break
 			}
 
 			// move to next seq
 			r.expectedSeq++
+			r.sendQuotaTick++
 
+			if r.sendQuotaTick == defaultQuotaReport {
+				r.sendQuotaTick = 0
+				r.tunnel.onQuotaReport(r, defaultQuotaReport)
+			}
 		} else {
 			break
 		}
