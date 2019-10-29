@@ -45,6 +45,10 @@ func newRPacketQueue() *RPacketQueue {
 	return q
 }
 
+func (q *RPacketQueue) clear() {
+	q.h = make([]*RPacket, 0, 16)
+}
+
 func (q *RPacketQueue) size() int {
 	return q.h.Len()
 }
