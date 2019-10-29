@@ -38,8 +38,6 @@ type Request struct {
 
 func newRequest(o *Account, idx uint16) *Request {
 	r := &Request{owner: o, idx: idx}
-	r.queue = newRPacketQueue()
-
 	return r
 }
 
@@ -56,6 +54,7 @@ func (r *Request) use(sreq *socks5.SocksRequest, t *Tunnel) {
 
 	r.tag++
 	r.isUsed = true
+	r.queue = newRPacketQueue()
 }
 
 func (r *Request) unuse() {
@@ -63,6 +62,7 @@ func (r *Request) unuse() {
 	r.sreq = nil
 	r.tag++
 	r.isUsed = false
+	r.queue = nil
 
 	if r.conn != nil {
 		r.conn.Close()

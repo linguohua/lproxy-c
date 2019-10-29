@@ -128,14 +128,6 @@ func (t *Tunnel) onClose() {
 	t.reqMap = make(map[uint16]*Request)
 }
 
-func (t *Tunnel) remember(r *Request) {
-	t.reqMap[r.idx] = r
-}
-
-func (t *Tunnel) forget(r *Request) {
-	delete(t.reqMap, r.idx)
-}
-
 func (t *Tunnel) onTunnelMessage(message []byte) error {
 	if len(message) < 5 {
 		return fmt.Errorf("invalid tunnel message")

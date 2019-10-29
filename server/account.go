@@ -75,17 +75,14 @@ func (a *Account) HandleRequest(req *socks5.SocksRequest) error {
 	}
 
 	r, err := a.reqq.alloc(req, t)
+
 	if err != nil {
 		log.Println("HandleRequest failed, req alloc failed:", err)
 
 		return err
 	}
 
-	t.remember(r)
-
 	r.proxy()
-
-	t.forget(r)
 
 	return nil
 }
